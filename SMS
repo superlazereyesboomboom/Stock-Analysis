@@ -1,0 +1,62 @@
+from flask import Flask, request
+import requests
+from twilio.twiml.messaging_response import MessagingResponse
+import json
+import ast
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
+scope = ["https://spreadsheets.google.com/feeds",'https://www.googleapis.com/auth/spreadsheets',"https://www.googleapis.com/auth/drive.file","https://www.googleapis.com/auth/drive"]
+
+creds = ServiceAccountCredentials.from_json_keyfile_name("creds.json", scope)
+
+client = gspread.authorize(creds)
+
+sheet = client.open("test").sheet1  # Open the spreadhseet
+
+app = Flask('__name__')
+
+def get_jsonparsed_data(url):
+    r = requests.get(url)
+    if r.status_code == 200:
+        data = r.json()
+        #return Json data as a string
+        data = json.dumps(data)
+        #remove brackets from string
+        data = data.strip("][")
+        if data:
+            #Convert string into dict
+            data = ast.literal_eval(data)
+        if not data:
+            data = "Not a valid ticker"
+
+        return data
+    
+
+
+@app.route('/bot', methods=['POST'])
+def bot():
+        
+        incoming_msg = request.values.get('Body', '').lower()
+        resp = MessagingResponse()
+        msg = resp.message()
+        stock = incoming_msg
+        stock = stock.upper()
+        url = ("https://financialmodelingprep.com/api/v3/quote-short/{stock}?apikey=5fc65f96221e574a2547e94edae09a92").format(stock=stock)
+        return_msg = get_jsonparsed_data(url)
+        url2 = ("https://financialmodelingprep.com/api/v3/financial-growth/{stock}?apikey=5fc65f96221e574a2547e94edae09a92").format(stock=stock)
+        return_msg2 = get_jsonparsed_data(url2)
+        url3 = ("https://financialmodelingprep.com/api/v3/company/profile/{stock}?apikey=5fc65f96221e574a2547e94edae09a92").format(stock=stock)
+        return_msg3 = get_jsonparsed_data(url3)
+        try:
+            insertRow=[stock,return_msg["price"],return_msg2[0]['date'],return_msg2[0]['revenueGrowth'],return_msg2[0]['netIncomeGrowth'],return_msg3["profile"]["beta"],return_msg3["profile"]["sector"]]
+            
+            sheet.insert_row(insertRow,2)
+
+            return_msg = f'{return_msg["symbol"]} is {return_msg["price"]}'
+        except:
+            return_msg = get_jsonparsed_data(url)
+        
+        msg.body(return_msg)
+        return str(resp)
+
